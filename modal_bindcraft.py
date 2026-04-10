@@ -81,7 +81,7 @@ def bindcraft(
     interface_protocol="AlphaFold2",
     template_protocol="Default",
     filter_option="Default",
-    max_trajectories: int | None = None,
+    max_trajectories: int = None,
 ):
     """Executes the BindCraft pipeline to design protein binders against a target structure.
 
@@ -97,7 +97,7 @@ def bindcraft(
         interface_protocol (str): Interface protocol (e.g., "AlphaFold2", "MPNN").
         template_protocol (str): Template protocol (e.g., "Default", "Masked").
         filter_option (str): Filter settings to apply (e.g., "Default", "Peptide").
-        max_trajectories (int | None): Maximum number of design trajectories to run.
+        max_trajectories (int): Maximum number of design trajectories to run.
 
     Returns:
         list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative output
@@ -1101,10 +1101,11 @@ def main(
     target_hotspot_residues: str = "",
     lengths: str = "50,130",
     number_of_final_designs: int = 1,
-    max_trajectories: int | None = None,
-    binder_name: str | None = None,
+    max_trajectories: int = None,
+    binder_name: str = None,
     out_dir: str = "./out/bindcraft",
-    run_name: str | None = None,
+    run_name: str = None,
+    filter_option: str = "Default",
 ):
     """Local entrypoint to run BindCraft binder design.
 
@@ -1118,14 +1119,15 @@ def main(
         lengths (str, optional): Comma-separated string defining the range of lengths for the binder
                                  (e.g., "50,130"). Defaults to "50,130".
         number_of_final_designs (int, optional): Desired number of final designs. Defaults to 1.
-        max_trajectories (int | None, optional): Maximum number of design trajectories to run.
+        max_trajectories (int, optional): Maximum number of design trajectories to run.
                                                  Defaults to None.
-        binder_name (str | None, optional): Name for the binder design project. If None, it's derived
+        binder_name (str, optional): Name for the binder design project. If None, it's derived
                                             from the input PDB filename. Defaults to None.
         out_dir (str, optional): Directory to save the output files. Defaults to "./out/bindcraft".
-        run_name (str | None, optional): Optional name for the run, used to create a subdirectory
+        run_name (str, optional): Optional name for the run, used to create a subdirectory
                                          in `out_dir`. If None, a timestamp-based name is used.
                                          Defaults to None.
+        filter_option (str, optional): Filter settings (Default, Relaxed, None). Defaults to "Default".
 
     Returns:
         None
@@ -1148,6 +1150,7 @@ def main(
         lengths=lengths_list,
         number_of_final_designs=number_of_final_designs,
         max_trajectories=max_trajectories,
+        filter_option=filter_option,
     )
 
     for out_file, out_content in outputs:

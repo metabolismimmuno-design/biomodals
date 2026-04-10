@@ -35,6 +35,7 @@ References:
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from modal import App, Image, Volume
 
@@ -263,7 +264,7 @@ def mber_design_vhh(
     target_name: str,
     masked_binder_seq: str = DEFAULT_VHH_MASKED,
     chains: str = "A",
-    target_hotspot_residues: str | None = None,
+    target_hotspot_residues: Optional[str] = None,
     include_surrounding_context: bool = False,
 ) -> list[tuple[Path, bytes]]:
     """Design a VHH binder against a target using mBER.
@@ -428,14 +429,14 @@ def mber_design_vhh(
 def main(
     target_pdb: str,
     target_name: str,
-    target_id: str | None = None,
+    target_id: Optional[str] = None,
     masked_binder_seq: str = DEFAULT_VHH_MASKED,
     chains: str = "A",
-    target_hotspot_residues: str | None = None,
+    target_hotspot_residues: Optional[str] = None,
     include_surrounding_context: bool = True,
-    chain_offsets: str | None = None,
+    chain_offsets: Optional[str] = None,
     output_dir: str = "./out/mber",
-    run_name: str | None = None,
+    run_name: Optional[str] = None,
 ):
     """Design a VHH binder against a target PDB using mBER."""
     from datetime import datetime
