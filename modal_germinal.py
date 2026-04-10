@@ -126,7 +126,45 @@ def patch_germinal_code():
     utils_py.write_text(content)
     print("✓ Patched utils.py: added PDB header fix for DSSP")
 
-    # Patch 3: Wrap PyRosetta filter calls in try-except
+    # Patch 3b: Fix IgLM tokenizer compatibility in CustomIgLM
+    # Encode amino acids in context rather than using convert_tokens_to_ids,
+    # which fails when the tokenizer uses BPE or other subword schemes.
+    iglm_model_py = Path("/tmp/germinal/colabdesign/colabdesign/iglm/model.py")
+    content = iglm_model_py.read_text()
+    content = content.replace(
+        """        aa_ids = []
+        for aa in self.amino_acids:
+            tid = self.tokenizer.convert_tokens_to_ids(aa)
+            if tid == self.tokenizer.unk_token_id:
+                raise ValueError(f"Unrecognized amino acid token: {aa}")
+            aa_ids.append(tid)
+        self.amino_acid_ids = torch.tensor(aa_ids, device=self.device)""",
+        """        # Encode each amino acid in context to get token IDs robustly
+        _chain_base_ids = self.tokenizer.encode(self.chain_token, add_special_tokens=False)
+        aa_ids = []
+        for aa in self.amino_acids:
+            _full_ids = self.tokenizer.encode(self.chain_token + aa, add_special_tokens=False)
+            _new_ids = _full_ids[len(_chain_base_ids):]
+            if not _new_ids:
+                raise ValueError(f"Could not tokenize amino acid: {aa}")
+            aa_ids.append(_new_ids[0])
+        self.amino_acid_ids = torch.tensor(aa_ids, device=self.device)"""
+    )
+    content = content.replace(
+        """        self.starting_binder_seq_tokens = [
+            self.tokenizer.convert_tokens_to_ids(aa) for aa in self.starting_binder_seq
+        ]""",
+        """        _chain_base_ids2 = self.tokenizer.encode(self.chain_token, add_special_tokens=False)
+        self.starting_binder_seq_tokens = []
+        for aa in self.starting_binder_seq:
+            _full = self.tokenizer.encode(self.chain_token + aa, add_special_tokens=False)
+            _new = _full[len(_chain_base_ids2):]
+            self.starting_binder_seq_tokens.append(_new[0] if _new else self.tokenizer.unk_token_id)"""
+    )
+    iglm_model_py.write_text(content)
+    print("✓ Patched iglm/model.py: fixed tokenizer amino acid lookup")
+
+    # Patch 4: Wrap PyRosetta filter calls in try-except
     # Match the code block that calls filter_utils.run_filters with final_filters
     # This is the code that can throw PyRosetta DAlphaBall geometry errors
     run_germinal_py = Path("/tmp/germinal/run_germinal.py")
@@ -233,7 +271,7 @@ image = (
         "pip install 'jax[cuda12_pip]==0.5.3' -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
     )
     .pip_install(
-        "https://west.rosettacommons.org/pyrosetta/release/release/PyRosetta4.Release.python310.ubuntu.wheel/pyrosetta-2025.37+release.df75a9c48e-cp310-cp310-linux_x86_64.whl"
+        "https://west.rosettacommons.org/pyrosetta/release/release/PyRosetta4.Release.python310.ubuntu.wheel/pyrosetta-2026.6+release.e5a76a2dbd-cp310-cp310-linux_x86_64.whl"
     )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign"
@@ -577,7 +615,7 @@ def main(
     max_trajectories: int = 100,
     max_passing_designs: int = 10,
     experiment_name: str = "germinal_design",
-    run_name: str | None = None,
+    run_name: str = "",
     out_dir: str = "./out/germinal",
 ):
     """
