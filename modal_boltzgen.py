@@ -51,9 +51,12 @@ def download_boltzgen_models():
 
 
 image = (
-    Image.debian_slim()
+    Image.debian_slim(python_version="3.11")
     .apt_install("git", "wget", "build-essential")
-    .pip_install("torch>=2.4.1")
+    .pip_install(
+        "torch>=2.6.0",
+        extra_index_url="https://download.pytorch.org/whl/cu126",
+    )
     .run_commands(
         "git clone https://github.com/HannesStark/boltzgen /root/boltzgen",
         "cd /root/boltzgen && git checkout 247b9bbd8b68a60aba854c2968d6a0cddd21ad6d && pip install -e .",  # Dec 18 2025 - includes weights_only fix
@@ -75,10 +78,10 @@ def boltzgen_run(
     additional_files: dict[str, bytes],
     protocol: str = "protein-anything",
     num_designs: int = 10,
-    steps: str | None = None,
-    cache: str | None = None,
-    devices: int | None = None,
-    extra_args: str | None = None,
+    steps: str = None,
+    cache: str = None,
+    devices: int = None,
+    extra_args: str = None,
 ) -> list:
     """Run BoltzGen on a yaml specification.
 
@@ -148,12 +151,12 @@ def main(
     input_yaml: str,
     protocol: str = "protein-anything",
     num_designs: int = 10,
-    steps: str | None = None,
-    cache: str | None = None,
-    devices: int | None = None,
-    extra_args: str | None = None,
+    steps: str = None,
+    cache: str = None,
+    devices: int = None,
+    extra_args: str = None,
     out_dir: str = "./out/boltzgen",
-    run_name: str | None = None,
+    run_name: str = None,
 ):
     """Run BoltzGen locally with results saved to out_dir.
 
@@ -175,15 +178,35 @@ def main(
     yaml_str = yaml_path.read_text()
     yaml_dir = yaml_path.parent
 
-    # Find any file references in the yaml (path: something.cif)
+    # Find any file references in the yaml (path: something.cif or list items)
     # File paths in yaml are relative to the yaml file location
     additional_files = {}
-    for match in re.finditer(r"path:\s*([^\s\n]+)", yaml_str):
-        ref_file = match.group(1)
-        ref_path = yaml_dir / ref_file
-        if ref_path.exists():
-            additional_files[ref_file] = ref_path.read_bytes()
-            print(f"Including referenced file: {ref_file}")
+
+    def collect_files(yaml_text, base_dir, rel_prefix=""):
+        """Collect files referenced in yaml, recursing into sub-yaml files."""
+        # Match "path: file.ext" (single-line)
+        for match in re.finditer(r"path:\s*([^\s\n\[]+)", yaml_text):
+            ref_file = match.group(1).strip()
+            ref_path = base_dir / ref_file
+            full_key = f"{rel_prefix}{ref_file}" if rel_prefix else ref_file
+            if ref_path.exists() and full_key not in additional_files:
+                additional_files[full_key] = ref_path.read_bytes()
+                print(f"Including referenced file: {full_key}")
+        # Match YAML list items like "  - scaffolds/7eow.yaml"
+        for match in re.finditer(r"^\s+-\s+(\S+)\s*$", yaml_text, re.MULTILINE):
+            ref_file = match.group(1)
+            ref_path = base_dir / ref_file
+            full_key = f"{rel_prefix}{ref_file}" if rel_prefix else ref_file
+            if ref_path.exists() and full_key not in additional_files:
+                additional_files[full_key] = ref_path.read_bytes()
+                print(f"Including referenced file: {full_key}")
+                if ref_file.endswith((".yaml", ".yml")):
+                    sub_dir = ref_path.parent
+                    sub_prefix = str(Path(full_key).parent)
+                    sub_prefix = "" if sub_prefix == "." else sub_prefix + "/"
+                    collect_files(ref_path.read_text(), sub_dir, sub_prefix)
+
+    collect_files(yaml_str, yaml_dir)
 
     outputs = boltzgen_run.remote(
         yaml_str=yaml_str,
