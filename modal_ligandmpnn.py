@@ -4,6 +4,7 @@
 #     "modal>=1.0",
 # ]
 # ///
+from __future__ import annotations
 """LigandMPNN (superseding ProteinMPNN) for protein design on Modal.
 
 LigandMPNN: https://github.com/dauparas/LigandMPNN
@@ -33,6 +34,7 @@ modal run modal_ligandmpnn.py --input-pdb in/ligandmpnn/1IVO_edited.pdb \
 
 import os
 from pathlib import Path
+from typing import Optional
 
 import modal
 from modal import App, Image
@@ -113,17 +115,28 @@ def extract_chains_inplace(pdb_file: str, extract_chains: str) -> str:
     return pdb_file
 
 
+# 松约束：只固定骆驼科签名位点（结构核心 + VHH 单域稳定性关键位点）
+# 不依赖 CDR 边界，适用于允许 FR 有一定变化但保留折叠必需残基的场景
+VHH_LOOSE_FIXED = [22, 37, 44, 45, 47, 92]
+
+# 紧约束：动态计算 FR = 所有 chain A 残基 − CDR 位点
+# 需要用户通过 --cdr-positions 传入 CDR 位点（JSON 格式），适用于严格保持 VHH 框架保守性的场景
+# 示例：'{"A": [26,27,28,29,30,31,32,33,52,53,54,55,56,57,58,98,99,100,101,102,103,104,105,106,107,108]}'
+
+
 @app.function(timeout=TIMEOUT * 60, gpu=GPU)
 def ligandmpnn(
     input_pdb_str: str,
     input_pdb_name: str,
-    params_str: str | None = None,
+    params_str: Optional[str] = None,
     calc_score: bool = False,
-    score_params_str: str | None = None,
-    extract_chains: str | None = None,
-) -> list[tuple[Path, bytes]]:
+    score_params_str: Optional[str] = None,
+    extract_chains: Optional[str] = None,
+    vhh_framework_mode: Optional[str] = None,
+    cdr_positions: Optional[str] = None,
+) -> list:
     """Runs LigandMPNN on a PDB input string.
-    
+
     Args:
         input_pdb_str (str): PDB file content as a string.
         input_pdb_name (str): Name for the PDB file.
@@ -131,10 +144,20 @@ def ligandmpnn(
         calc_score (bool): Whether to calculate scores for the output.
         score_params_str (str | None): Optional parameters for scoring.
         extract_chains (str | None): Chain identifiers to extract from the PDB.
-        
+        vhh_framework_mode (str | None): VHH framework constraint mode.
+            "loose" — fix camelid signature positions only (22, 37, 44, 45, 47, 92 on chain A).
+                      No cdr_positions needed.
+            "strict" — fix all FR positions = (all chain A residues) − CDR positions.
+                       Requires cdr_positions to be provided.
+            None — no framework constraints (default, all positions free).
+        cdr_positions (str | None): JSON string specifying CDR residue numbers per chain.
+            Required for strict mode. Example:
+            '{"A": [26,27,28,29,30,31,32,33,52,53,54,55,56,57,58,98,99,100,101,102,103,104,105,106,107,108]}'
+
     Returns:
         list[tuple[Path, bytes]]: A list of tuples containing output file paths and their byte content.
     """
+    import json
     from subprocess import run
 
     out_dir = "./out"
@@ -142,6 +165,41 @@ def ligandmpnn(
     open(input_pdb_name, "w").write(input_pdb_str)
     if extract_chains is not None:
         input_pdb_name = extract_chains_inplace(input_pdb_name, extract_chains)
+
+    # VHH framework constraint: generate fixed_positions_jsonl if mode is specified
+    if vhh_framework_mode is not None:
+        if vhh_framework_mode not in ("loose", "strict"):
+            raise ValueError(f"vhh_framework_mode must be 'loose', 'strict', or None. Got: {vhh_framework_mode!r}")
+
+        if vhh_framework_mode == "loose":
+            fixed_positions = VHH_LOOSE_FIXED
+
+        else:  # strict: FR = all chain A residues − CDR positions
+            if cdr_positions is None:
+                raise ValueError("vhh_framework_mode='strict' requires --cdr-positions (JSON string of CDR residue numbers).")
+
+            from Bio.PDB import PDBParser
+
+            cdr_set = set(json.loads(cdr_positions).get("A", []))
+
+            parser = PDBParser(QUIET=True)
+            structure = parser.get_structure("nb", input_pdb_name)
+            all_chain_a = set()
+            for model in structure:
+                if "A" in model:
+                    for residue in model["A"]:
+                        if residue.id[0] == " ":
+                            all_chain_a.add(residue.id[1])
+                break
+
+            fixed_positions = sorted(all_chain_a - cdr_set)
+            print(f"[strict] chain A total={len(all_chain_a)}, CDR={len(cdr_set)}, FR fixed={len(fixed_positions)}")
+
+        # Use --fixed_residues flag (--fixed_positions_jsonl is not supported in current LigandMPNN)
+        fixed_residues_str = " ".join(f"A{pos}" for pos in fixed_positions)
+        extra = f' --fixed_residues "{fixed_residues_str}"'
+        params_str = (params_str if params_str is not None else DEFAULT_PARAMS) + extra
+        print(f"[VHH framework mode: {vhh_framework_mode}] fixed {len(fixed_positions)} positions on chain A")
 
     # --------------------------------------------------------------------------
     # Run LigandMPNN
@@ -181,15 +239,17 @@ def ligandmpnn(
 @app.local_entrypoint()
 def main(
     input_pdb: str,
-    params_str: str | None = None,
+    params_str: Optional[str] = None,
     calc_score: bool = False,
-    score_params_str: str | None = None,
-    extract_chains: str | None = None,
-    run_name: str | None = None,
+    score_params_str: Optional[str] = None,
+    extract_chains: Optional[str] = None,
+    run_name: Optional[str] = None,
     out_dir: str = "./out/ligandmpnn",
+    vhh_framework_mode: Optional[str] = None,
+    cdr_positions: Optional[str] = None,
 ):
     """Local entrypoint to run LigandMPNN predictions using Modal.
-    
+
     Args:
         input_pdb (str): Path to an input PDB file.
         params_str (str | None): Optional string of additional parameters for LigandMPNN.
@@ -199,7 +259,13 @@ def main(
         run_name (str | None): Optional name for the run, used for organizing output files.
                                If None, a timestamp-based name is used.
         out_dir (str): Directory to save the output files. Defaults to "./out/ligandmpnn".
-        
+        vhh_framework_mode (str | None): VHH framework constraint mode.
+            "loose" — fix camelid signature positions only (22, 37, 44, 45, 47, 92 on chain A).
+            "strict" — fix all FR = (all chain A residues) − CDR positions. Requires --cdr-positions.
+            None — no framework constraints (default).
+        cdr_positions (str | None): JSON string of CDR residue numbers per chain. Required for strict mode.
+            Example: '{"A": [26,27,28,29,30,31,32,33,52,53,54,55,56,57,58,98,99,...,108]}'
+
     Returns:
         None
     """
@@ -208,7 +274,8 @@ def main(
     input_pdb_str = open(input_pdb).read()
 
     outputs = ligandmpnn.remote(
-        input_pdb_str, Path(input_pdb).name, params_str, calc_score, score_params_str, extract_chains
+        input_pdb_str, Path(input_pdb).name, params_str, calc_score, score_params_str, extract_chains,
+        vhh_framework_mode, cdr_positions,
     )
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
