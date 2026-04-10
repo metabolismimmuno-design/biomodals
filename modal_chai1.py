@@ -4,6 +4,8 @@
 #     "modal>=1.0",
 # ]
 # ///
+from __future__ import annotations
+
 """Runs Chai-1, a protein-ligand co-folding model, on Modal.
 
 Chai-1r: https://github.com/chaidiscovery/chai-lab
@@ -61,7 +63,7 @@ def download_models():
 
 
 image = (
-    Image.debian_slim()
+    Image.debian_slim(python_version="3.11")
     .apt_install("wget")
     .uv_pip_install("chai_lab==0.6.1")
     .run_function(download_models, gpu="a100")
@@ -127,8 +129,8 @@ def chai1(
 def main(
     input_faa: str,
     out_dir: str = "./out/chai1",
-    run_name: str | None = None,
-    chai1_kwargs: str | None = None,
+    run_name=None,
+    chai1_kwargs=None,
 ):
     """Local entrypoint for running Chai-1 predictions using Modal.
 
