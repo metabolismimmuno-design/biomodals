@@ -50,7 +50,7 @@ from modal import Image, App
 
 OUTPUT_ROOT = "rfdiffusion"
 GPU = os.environ.get("GPU", "A10G")
-TIMEOUT = int(os.environ.get("TIMEOUT", 15))
+TIMEOUT = int(os.environ.get("TIMEOUT", 30))
 
 app = App()
 
@@ -71,12 +71,21 @@ image = (
     )
     .run_commands("git clone https://github.com/sokrypton/RFdiffusion.git")
     .pip_install(
-        ["torch==2.6.0+cu124", "torchvision==0.21.0+cu124", "torchdata==0.10.0"],
-        index_url="https://download.pytorch.org/whl/cu124",
+        ["torch==2.5.1+cu121", "torchvision==0.20.1+cu121"],
+        index_url="https://download.pytorch.org/whl/cu121",
     )
     .pip_install(
         ["dgl==2.1.0+cu121"], find_links="https://data.dgl.ai/wheels/cu121/repo.html"
     )
+    .run_commands(
+        "SITE=$(python -c 'import site; print(site.getsitepackages()[0])');"
+        "GB=$SITE/dgl/graphbolt;"
+        "rm -rf $GB;"
+        "mkdir $GB;"
+        "printf 'graphbolt_disabled = True\\n' > $GB/__init__.py;"
+        "echo 'graphbolt nuked at' $GB"
+    )
+    .pip_install(["e3nn"])
     .pip_install(
         [
             "jedi",
@@ -419,6 +428,8 @@ def run_diffusion(
             f"{full_path}_{n}.pdb",
         ]
         for pdb in pdbs:
+            if not os.path.exists(pdb):
+                continue
             with open(pdb, "r") as handle:
                 pdb_str = handle.read()
             with open(pdb, "w") as handle:
