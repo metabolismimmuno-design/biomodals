@@ -4,6 +4,8 @@
 #     "modal>=1.0",
 # ]
 # ///
+from __future__ import annotations
+
 """Runs Boltz-1x for protein structure and complex prediction on Modal.
 
 Boltz-1x: https://github.com/jwohlwend/boltz
@@ -55,7 +57,7 @@ DEFAULT_PARAMS = "--use_msa_server --seed 42"
 
 
 def download_model():
-    """Forces download of the Boltz-1 model by running it once.
+    """Downloads Boltz-1 model weights and CCD dictionary to the cache volume.
 
     Args:
         None
@@ -63,17 +65,15 @@ def download_model():
     Returns:
         None
     """
-    from boltz.main import download_boltz1, download_boltz2
-    import urllib
-    import urllib.request
+    from boltz.main import download
 
-    if not Path(f"{CACHE_DIR}/boltz1_conf.ckpt").exists():
-        print("downloading boltz 1")
-        download_boltz1(Path(CACHE_DIR))
-
-    if not Path(f"{CACHE_DIR}/boltz2_conf.ckpt").exists():
-        print("downloading boltz 2")
-        download_boltz2(Path(CACHE_DIR))
+    ckpt = Path(f"{CACHE_DIR}/boltz1_conf.ckpt")
+    if not ckpt.exists():
+        print("Downloading Boltz-1 weights...")
+        download(Path(CACHE_DIR))
+        print("Download complete.")
+    else:
+        print(f"Model already cached at {ckpt}")
 
 
 image = (
@@ -94,11 +94,9 @@ image = (
     .apt_install("build-essential")
     # Install CUDA toolkit via conda
     .pip_install(
-        "boltz==2.2.1",
+        "boltz==0.4.1",
         "pyyaml",
         "pandas",
-        "cuequivariance-torch",
-        "cuequivariance-ops-torch-cu12",
     )
     .run_function(
         download_model,
@@ -183,7 +181,7 @@ def _fasta_to_yaml(input_faa: str) -> str:
     gpu=GPU,
     volumes={f"/{BOLTZ_VOLUME_NAME}": BOLTZ_MODEL_VOLUME},
 )
-def boltz(input_str: str, params_str: str | None = None) -> list:
+def boltz(input_str: str, params_str=None) -> list:
     """Runs Boltz on a YAML or FASTA input string.
 
     The input can describe proteins, DNA, RNA, SMILES strings, or CCD identifiers.
@@ -235,10 +233,10 @@ def boltz(input_str: str, params_str: str | None = None) -> list:
 
 @app.local_entrypoint()
 def main(
-    input_faa: str | None = None,
-    input_yaml: str | None = None,
-    params_str: str | None = None,
-    run_name: str | None = None,
+    input_faa=None,
+    input_yaml=None,
+    params_str=None,
+    run_name=None,
     out_dir: str = "./out/boltz",
 ):
     """Local entrypoint to run Boltz predictions using Modal.
