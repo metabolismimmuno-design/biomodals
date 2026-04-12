@@ -5,7 +5,8 @@
 # ]
 # ///
 """
-Currently not working due to library incompatibilities.
+RFdiffusion v1: protein backbone diffusion for binder design and motif scaffolding.
+DGL graphbolt fix applied (graphbolt_disabled=True) — required for DGL 2.1.0 compatibility.
 
 
 

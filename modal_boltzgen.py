@@ -136,7 +136,15 @@ def boltzgen_run(
             cmd.extend(extra_args.split())
 
         print(f"Running: {' '.join(cmd)}")
-        run(cmd, check=True)
+        result = run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("STDOUT:", result.stdout[-2000:])
+            print("STDERR:", result.stderr[-2000:])
+            raise RuntimeError(
+                f"boltzgen run failed (rc={result.returncode}): "
+                f"{result.stderr[-500:] or result.stdout[-500:]}"
+            )
+        print(result.stdout[-1000:] if result.stdout else "")
 
         # Collect all output files
         return [

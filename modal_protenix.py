@@ -49,6 +49,7 @@ modal run modal_protenix.py --input-json test_protenix.json
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from modal import App, Image
 
@@ -224,16 +225,79 @@ def protenix(
         ]
 
 
+@app.function(timeout=TIMEOUT * 60, gpu=GPU)
+def run_prediction_zip(
+    input_str: str,
+    input_name: str = "input",
+    seeds: str = DEFAULT_SEEDS,
+    use_msa: bool = True,
+    model_name: str = DEFAULT_MODEL,
+) -> bytes:
+    """Run Protenix and return all output files as a zip archive (bytes).
+
+    Designed for MCP async dispatch: can be spawned with .spawn() and
+    retrieved with call.get(timeout=0). Returns a single zip blob so that
+    MCP tools can handle results without list serialisation issues.
+
+    Args:
+        input_str: FASTA or JSON content (same as protenix()).
+        input_name: Name prefix for the prediction job.
+        seeds: Comma-separated seed values (e.g. "42" or "42,43").
+        use_msa: Whether to run MSA lookup (slower but more accurate).
+        model_name: Protenix model checkpoint name.
+
+    Returns:
+        bytes: ZIP archive containing all Protenix output files
+            (*.cif structures, *_summary_confidence.json scores, etc.).
+    """
+    import io
+    import zipfile
+    from subprocess import run
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as in_dir, TemporaryDirectory() as out_dir:
+        if input_str.strip().startswith(">"):
+            json_str = _fasta_to_json(input_str, name=input_name)
+            print("Converted FASTA to JSON:")
+            print(json_str)
+        else:
+            json_str = input_str
+
+        json_path = Path(in_dir) / "input.json"
+        json_path.write_text(json_str)
+
+        print(f"Running Protenix with model={model_name}, seeds={seeds}, use_msa={use_msa}")
+
+        run(
+            f'protenix pred --input "{json_path}" '
+            f'--out_dir "{out_dir}" '
+            f"--seeds {seeds} "
+            f"--use_msa {str(use_msa).lower()} "
+            f"--model_name {model_name} "
+            f"--enable_cache true --enable_fusion true",
+            shell=True,
+            check=True,
+        )
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for out_file in sorted(Path(out_dir).glob("**/*")):
+                if out_file.is_file():
+                    zf.write(out_file, out_file.relative_to(out_dir))
+
+        return buf.getvalue()
+
+
 @app.local_entrypoint()
 def main(
-    input_faa: str | None = None,
-    input_json: str | None = None,
+    input_faa: Optional[str] = None,
+    input_json: Optional[str] = None,
     seeds: str = DEFAULT_SEEDS,
     use_msa: bool = True,
     model_name: str = DEFAULT_MODEL,
     use_mini: bool = False,
-    out_dir: str | None = None,
-    run_name: str | None = None,
+    out_dir: Optional[str] = None,
+    run_name: Optional[str] = None,
 ):
     """Run Protenix predictions.
 
