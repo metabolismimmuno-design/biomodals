@@ -179,7 +179,7 @@ def small_molecule_binder(
 
         cmd = [
             "python",
-            f"{RFDIFFUSION2_DIR}/scripts/run_inference.py",
+            f"{RFDIFFUSION2_DIR}/rf_diffusion/run_inference.py",
             f"inference.input_pdb={input_pdb}",
             f"inference.output_prefix={output_prefix}",
             f"inference.num_designs={num_designs}",
@@ -247,7 +247,7 @@ def enzyme_scaffolding(
 
         cmd = [
             "python",
-            f"{RFDIFFUSION2_DIR}/scripts/run_inference.py",
+            f"{RFDIFFUSION2_DIR}/rf_diffusion/run_inference.py",
             f"inference.input_pdb={input_pdb}",
             f"inference.output_prefix={output_prefix}",
             f"inference.num_designs={num_designs}",
