@@ -45,6 +45,7 @@ uv run modal run modal_iggm.py --input-fasta antibody.fasta --task design
 
 import os
 from pathlib import Path
+from typing import List, Optional
 
 from modal import App, Image
 
@@ -202,12 +203,12 @@ def merge_pdb_chains(pdb_str: str, chains_to_merge: list) -> str:
 def iggm(
     input_fasta_str: str,
     task: str,
-    antigen_pdb_str: str | None = None,
-    epitope: list[int] | None = None,
-    fasta_origin_str: str | None = None,
-    num_samples: int | None = None,
+    antigen_pdb_str: Optional[str] = None,
+    epitope: Optional[List[int]] = None,
+    fasta_origin_str: Optional[str] = None,
+    num_samples: Optional[int] = None,
     relax: bool = False,
-    max_antigen_size: int | None = None,
+    max_antigen_size: Optional[int] = None,
 ) -> list:
     """Runs IgGM on a fasta file and returns the outputs.
 
@@ -295,13 +296,13 @@ def iggm(
 def main(
     input_fasta: str,
     task: str = "design",
-    antigen: str | None = None,
-    epitope: str | None = None,
-    fasta_origin: str | None = None,
-    num_samples: int | None = None,
+    antigen: Optional[str] = None,
+    epitope: Optional[str] = None,
+    fasta_origin: Optional[str] = None,
+    num_samples: Optional[int] = None,
     relax: bool = False,
-    max_antigen_size: int | None = None,
-    run_name: str | None = None,
+    max_antigen_size: Optional[int] = None,
+    run_name: Optional[str] = None,
     out_dir: str = "./out/iggm",
 ):
     """Run IgGM locally via Modal."""
