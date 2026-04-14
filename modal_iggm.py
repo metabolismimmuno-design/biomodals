@@ -281,8 +281,15 @@ def iggm(
 
         print(f"Running: {' '.join(cmd)}")
 
+        # Ensure conda's libstdc++ is found before the system one.
+        # pip-installed openmm's libOpenMM.so requires CXXABI_1.3.15 which is
+        # present in /opt/conda/lib but not in /usr/lib/x86_64-linux-gnu.
+        import os as _os
+        env = _os.environ.copy()
+        env["LD_LIBRARY_PATH"] = f"/opt/conda/lib:{env.get('LD_LIBRARY_PATH', '')}"
+
         # Run IgGM
-        run(cmd, check=True, cwd="/root/IgGM")
+        run(cmd, check=True, cwd="/root/IgGM", env=env)
 
         # Collect all output files
         return [
