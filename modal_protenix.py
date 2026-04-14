@@ -67,6 +67,10 @@ from modal import App, Image, Volume
 GPU = os.environ.get("GPU", "L40S")
 TIMEOUT = int(os.environ.get("TIMEOUT", 60))
 
+# 持久化存储预测结果（CIF + JSON），供按需下载
+protenix_results_vol = Volume.from_name("protenix-results", create_if_missing=True)
+RESULTS_MOUNT = "/root/protenix_results"
+
 ENTITY_TYPES = {"protein", "dna", "rna", "ligand", "ion"}
 
 ENTITY_TYPE_MAP = {
@@ -332,6 +336,110 @@ def seed_weights(model_name: str = DEFAULT_MODEL):
     protenix_weights.commit()
     size_mb = checkpoint_path.stat().st_size / 1024 / 1024
     print(f"完成！权重已保存至 Volume：{checkpoint_path}（{size_mb:.1f} MB）")
+
+
+@app.function(
+    timeout=TIMEOUT * 60,
+    gpu=GPU,
+    volumes={CHECKPOINT_MOUNT: protenix_weights, RESULTS_MOUNT: protenix_results_vol},
+)
+def run_prediction_fast(
+    input_str: str,
+    input_name: str = "input",
+    seeds: str = DEFAULT_SEEDS,
+    use_msa: bool = True,
+    model_name: str = DEFAULT_MODEL,
+    use_tfg_guidance: bool = True,
+) -> bytes:
+    """运行 Protenix，将所有输出存入 Volume，只返回 confidence JSON zip（几 KB）。
+
+    与 run_prediction_zip 相比：
+    - 返回值从几十 MB 降至 <100 KB（只含 JSON 分数，无 CIF）
+    - 所有 CIF 文件保存在 protenix-results Volume，可通过 get_cif_zip() 按需获取
+
+    Args:
+        input_str: FASTA 或 JSON 内容。
+        input_name: 任务名称，同时作为 Volume 内的存储路径前缀。
+        seeds: 逗号分隔的随机种子。
+        use_msa: 是否使用 MSA。
+        model_name: 模型名称。
+        use_tfg_guidance: 启用 TFG 引导（Ab-Ag 预测推荐开启）。
+
+    Returns:
+        bytes: 只含 *_summary_confidence.json 文件的 ZIP。
+    """
+    import io
+    import shutil
+    import zipfile
+    from subprocess import run
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as in_dir, TemporaryDirectory() as out_dir:
+        if input_str.strip().startswith(">"):
+            json_str = _fasta_to_json(input_str, name=input_name)
+        else:
+            json_str = input_str
+
+        import json as _json
+        json_path = Path(in_dir) / "input.json"
+        json_path.write_text(json_str)
+
+        print(f"Running Protenix fast: model={model_name}, seeds={seeds}, use_msa={use_msa}")
+
+        run(
+            f'protenix pred --input "{json_path}" '
+            f'--out_dir "{out_dir}" '
+            f"--seeds {seeds} "
+            f"--use_msa {str(use_msa).lower()} "
+            f"--model_name {model_name} "
+            f"--use_tfg_guidance {str(use_tfg_guidance).lower()} "
+            f"--enable_cache true --enable_fusion true",
+            shell=True,
+            check=True,
+        )
+
+        # 将所有文件存入 Volume（CIF + JSON 都保留）
+        vol_path = Path(RESULTS_MOUNT) / input_name
+        if vol_path.exists():
+            shutil.rmtree(vol_path)
+        shutil.copytree(Path(out_dir), vol_path)
+        protenix_results_vol.commit()
+        print(f"Saved all outputs to Volume: protenix-results/{input_name}")
+
+        # 只打包 confidence JSON 返回（几 KB）
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for jf in sorted(Path(out_dir).glob("**/*summary_confidence*.json")):
+                zf.write(jf, jf.relative_to(out_dir))
+        payload = buf.getvalue()
+        print(f"Returning scores-only ZIP: {len(payload)/1024:.1f} KB")
+        return payload
+
+
+@app.function(
+    timeout=300,
+    volumes={RESULTS_MOUNT: protenix_results_vol},
+)
+def get_cif_zip(input_name: str) -> bytes:
+    """从 Volume 按需获取指定任务的 CIF 结构文件（无需重新预测）。
+
+    Args:
+        input_name: 任务名称（与 run_prediction_fast 提交时相同）。
+
+    Returns:
+        bytes: 含所有 *.cif 文件的 ZIP，若无结果则返回空 ZIP。
+    """
+    import io
+    import zipfile
+
+    vol_path = Path(RESULTS_MOUNT) / input_name
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        cif_files = sorted(vol_path.glob("**/*.cif")) if vol_path.exists() else []
+        for cif in cif_files:
+            zf.write(cif, cif.relative_to(vol_path))
+        print(f"Packed {len(cif_files)} CIF files for {input_name}")
+    return buf.getvalue()
 
 
 @app.local_entrypoint()
