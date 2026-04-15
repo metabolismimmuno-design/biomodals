@@ -92,6 +92,10 @@ image = (
         "git clone https://github.com/dauparas/LigandMPNN.git /LigandMPNN"
         " && cd /LigandMPNN"
         ' && bash get_model_params.sh "./model_params"'
+        # AbMPNN: ProteinMPNN fine-tuned on SAbDab antibody structures (Exscientia, arXiv:2310.19513).
+        # 20 MB weights downloaded from Zenodo at image build time.
+        ' && wget -q "https://zenodo.org/record/8164693/files/abmpnn.pt"'
+        ' -O "/LigandMPNN/model_params/abmpnn.pt"'
     )
 )
 
