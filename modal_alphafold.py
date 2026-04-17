@@ -18,7 +18,7 @@ from pathlib import Path
 from modal import App, Image
 
 GPU = os.environ.get("GPU", "A10G")
-TIMEOUT = os.environ.get("TIMEOUT", 20)
+TIMEOUT = int(os.environ.get("TIMEOUT", 20))
 
 image = (
     Image.micromamba(python_version="3.11")
@@ -247,7 +247,6 @@ def alphafold(
                     af2m_scores = score_af2m_binding(json_data, target_len, binders_len)
                     scores_json = json.dumps(af2m_scores, indent=2)
                     zip_ref.writestr(f"{prefix}.af2m_scores.json", scores_json)
-                    break
 
     return [
         (out_file.relative_to(out_dir), open(out_file, "rb").read())

@@ -29,7 +29,7 @@ from pathlib import Path
 from modal import App, Image
 
 GPU = os.environ.get("MODAL_GPU", "L40S")
-TIMEOUT = os.environ.get("MODAL_TIMEOUT", 20 * 60)
+TIMEOUT = int(os.environ.get("MODAL_TIMEOUT", 20 * 60))
 
 image = (
     Image.micromamba()
@@ -556,6 +556,8 @@ def main(
     pdb_str = open(input_pdb).read()
 
     if model_name is None:
+        # Default: monomer fold self-consistency (VHH only, no antigen)
+        # For complex interface scoring pass: --model-name model_1_multimer_v3
         model_name = "model_1_ptm"
 
     outputs = run_af2rank.remote(

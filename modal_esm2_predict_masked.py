@@ -70,10 +70,14 @@ def esm2(fasta_name: str, fasta_str: str, make_figures: bool = False):
             results = model(batch_tokens, repr_layers=[33], return_contacts=True)
 
         for i, (label, seq) in enumerate(data):
-            # Find the position of the mask token for this sequence
-            mask_position = (batch_tokens[i] == alphabet.mask_idx).nonzero(as_tuple=True)[
-                0
-            ][0]
+            # Find the position of the mask token for this sequence.
+            # NOTE: only the FIRST <mask> per entry is processed.
+            # To predict multiple positions, split them into separate FASTA entries.
+            mask_positions = (batch_tokens[i] == alphabet.mask_idx).nonzero(as_tuple=True)[0]
+            if len(mask_positions) == 0:
+                print(f"WARNING: no <mask> token found in entry '{label}', skipping")
+                continue
+            mask_position = mask_positions[0]
 
             # Get logits for the masked position
             logits = results["logits"][i, mask_position]

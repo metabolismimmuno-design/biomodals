@@ -39,7 +39,7 @@ from typing import Optional
 
 from modal import App, Image, Volume
 
-GPU = os.environ.get("GPU", "A100")
+GPU = os.environ.get("GPU", "H100")
 TIMEOUT = int(os.environ.get("TIMEOUT", 120))  # 2 hours default
 
 # Use existing germinal-models volume that has AlphaFold2 weights
@@ -433,7 +433,7 @@ def main(
     masked_binder_seq: str = DEFAULT_VHH_MASKED,
     chains: str = "A",
     target_hotspot_residues: Optional[str] = None,
-    include_surrounding_context: bool = True,
+    include_surrounding_context: bool = False,
     chain_offsets: Optional[str] = None,
     output_dir: str = "./out/mber",
     run_name: Optional[str] = None,

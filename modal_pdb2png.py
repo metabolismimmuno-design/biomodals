@@ -108,7 +108,14 @@ def apply_render_style(render_style: str) -> None:
     if render_style in RENDER_OPTIONS:
         render_style_dict = RENDER_OPTIONS[render_style]
     else:
-        render_style_dict = json.loads(render_style)
+        try:
+            render_style_dict = json.loads(render_style)
+        except json.JSONDecodeError as e:
+            valid = list(RENDER_OPTIONS.keys())
+            raise ValueError(
+                f"render_style {render_style!r} is not a preset name {valid} "
+                f"and is not valid JSON: {e}"
+            ) from e
 
     for k, v in render_style_dict.items():
         if k == "bg_color":

@@ -81,7 +81,7 @@ ENTITY_TYPE_MAP = {
     "ion": "ion",
 }
 
-DEFAULT_MODEL = "protenix-v2"
+DEFAULT_MODEL = "protenix_base_20250630_v1.0.0"  # protenix-v2 权重尚未公开（ByteDance 审查中），实际可用 checkpoint
 DEFAULT_SEEDS = "42"
 
 # Modal Volume 持久化模型权重，避免每次从中国 CDN 重新下载

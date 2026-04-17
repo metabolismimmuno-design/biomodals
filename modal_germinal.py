@@ -505,14 +505,10 @@ def run_germinal_design(
                 print(f"STDERR: {result.stderr}")
 
             if result.returncode != 0:
-                return {
-                    "error": f"Germinal failed with return code {result.returncode}",
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                    "experiment_name": experiment_name,
-                    "target_name": target_data["target_name"],
-                    "status": "failed",
-                }
+                raise RuntimeError(
+                    f"Germinal failed (exit {result.returncode}).\n"
+                    f"STDERR: {result.stderr[-3000:]}\nSTDOUT: {result.stdout[-2000:]}"
+                )
 
             # Look for results in the expected output directory
             results_dir = temp_path / "results" / experiment_name
@@ -542,9 +538,15 @@ def run_germinal_design(
                         file_path = Path(root) / file
                         relative_path = file_path.relative_to(results_dir)
                         try:
-                            # Read all files as text
-                            with open(file_path, "r") as f:
+                            with open(file_path, "r", encoding="utf-8") as f:
                                 results_data["output_files"][str(relative_path)] = f.read()
+                        except UnicodeDecodeError:
+                            # Binary file — store as base64 string
+                            import base64
+                            with open(file_path, "rb") as f:
+                                results_data["output_files"][str(relative_path)] = (
+                                    "<base64>" + base64.b64encode(f.read()).decode("ascii")
+                                )
                         except Exception as e:
                             results_data["output_files"][str(relative_path)] = (
                                 f"<error reading file: {e}>"
@@ -590,12 +592,7 @@ def run_germinal_design(
                 }
 
         except subprocess.TimeoutExpired:
-            return {
-                "error": f"Germinal timed out after {TIMEOUT} minutes",
-                "experiment_name": experiment_name,
-                "target_name": target_data["target_name"],
-                "status": "timeout",
-            }
+            raise RuntimeError(f"Germinal timed out after {TIMEOUT} minutes")
         except Exception as e:
             return {
                 "error": str(e),

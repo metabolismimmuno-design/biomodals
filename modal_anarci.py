@@ -61,6 +61,10 @@ def anarci(input_str: str, params: str | None = None) -> list[tuple[str, bytes]]
         command = f"ANARCI -i {input_file} --outfile {output_file_stem}"
 
         if params is not None:
+            # Basic guard: reject shell metacharacters to prevent injection
+            forbidden = set(";&|`$(){}\\<>")
+            if any(c in params for c in forbidden):
+                raise ValueError(f"Forbidden characters in params: {params!r}")
             command += " " + params
         else:
             # Default to CSV output as it's a common structured format

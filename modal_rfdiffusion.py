@@ -51,7 +51,7 @@ from modal import Image, App
 
 OUTPUT_ROOT = "rfdiffusion"
 GPU = os.environ.get("GPU", "A10G")
-TIMEOUT = int(os.environ.get("TIMEOUT", 30))
+TIMEOUT = int(os.environ.get("TIMEOUT", 120))
 
 app = App()
 
