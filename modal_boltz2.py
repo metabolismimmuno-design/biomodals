@@ -140,17 +140,30 @@ def run_structure_prediction(
     recycling_steps: int = 3,
     diffusion_samples: int = 1,
     seed: int = 42,
+    template_cif_str: str | None = None,
+    template_pdb_str: str | None = None,
+    msa_files: dict | None = None,
 ) -> bytes:
     """Run Boltz-2 structure prediction and return zip of outputs.
 
     Args:
         yaml_str: YAML string with sequences (protein, RNA, DNA, ligand, etc.)
         run_name: Name prefix for output files.
-        use_msa_server: Use ColabFold MSA server for better accuracy.
+        use_msa_server: Use ColabFold MSA server. Only applies to protein chains
+            with `msa: auto` (or msa unset). Chains with explicit `msa: empty`
+            or `msa: __MSA_<key>__` are respected per-chain.
         use_potentials: Enable inference-time potentials (slower, higher quality).
         recycling_steps: Number of structure recycling steps (default 3).
         diffusion_samples: Number of diffusion samples (default 1).
         seed: Random seed.
+        template_cif_str: Optional CIF content as string. If provided, written to
+            container-side file; yaml_str must contain placeholder `__TEMPLATE_CIF__`
+            which will be substituted with the container path before invocation.
+        msa_files: Optional dict {placeholder_key: a3m_content_str}. For each key,
+            file is written to a temp path and yaml `__MSA_<key>__` placeholders are
+            substituted with that path. Use this for per-chain MSA control: antigen
+            chain → `msa: __MSA_A__`; VHH chain → `msa: empty` (single-sequence,
+            required for de novo CDR designs to avoid template-pulling bias).
 
     Returns:
         bytes: ZIP archive containing PDB/CIF structures + confidence JSON files.
@@ -163,8 +176,61 @@ def run_structure_prediction(
     os.environ["BOLTZ_CACHE"] = CACHE_DIR
 
     with TemporaryDirectory() as in_dir, TemporaryDirectory() as out_dir:
+        if template_cif_str is not None:
+            tpl_path = Path(in_dir) / "template.cif"
+            tpl_path.write_text(template_cif_str)
+            yaml_str = yaml_str.replace("__TEMPLATE_CIF__", str(tpl_path))
+            print(f"Template CIF staged at {tpl_path} ({len(template_cif_str)} chars)")
+        if template_pdb_str is not None:
+            tpl_path = Path(in_dir) / "template.pdb"
+            tpl_path.write_text(template_pdb_str)
+            yaml_str = yaml_str.replace("__TEMPLATE_PDB__", str(tpl_path))
+            print(f"Template PDB staged at {tpl_path} ({len(template_pdb_str)} chars)")
+        if msa_files:
+            for key, a3m_str in msa_files.items():
+                placeholder = f"__MSA_{key}__"
+                if placeholder not in yaml_str:
+                    print(f"[MSA] WARNING: placeholder {placeholder} not found in yaml_str", flush=True)
+                    continue
+                msa_path = Path(in_dir) / f"msa_{key}.a3m"
+                # Sanitize: ColabFold a3m sometimes ends with a trailing NULL byte
+                # which boltz's a3m parser rejects (KeyError on '\x00').
+                clean = a3m_str.replace("\x00", "")
+                msa_path.write_text(clean)
+                yaml_str = yaml_str.replace(placeholder, str(msa_path))
+                print(f"[MSA] {placeholder} → {msa_path} ({len(clean)} chars, stripped {len(a3m_str)-len(clean)} NULL bytes)", flush=True)
         input_path = Path(in_dir) / "input.yaml"
         input_path.write_text(yaml_str)
+
+        if template_cif_str is not None or template_pdb_str is not None:
+            print(f"=== Final YAML (post-substitution) ===\n{yaml_str}\n=== /YAML ===", flush=True)
+            # Boltz CLI catches template parse errors and prints only the brief message.
+            # Call the parsing pipeline directly to surface the full traceback.
+            try:
+                import yaml as _yaml
+                import pickle
+                from boltz.data.parse.schema import parse_boltz_schema
+                from boltz.main import CCD_PATH  # path to ccd.pkl in boltz cache
+                with open(input_path) as f:
+                    schema_dict = _yaml.safe_load(f)
+                # Load ccd from default cache path used by boltz CLI
+                ccd_path = Path(CACHE_DIR) / "ccd.pkl"
+                ccd = None
+                for trial in (ccd_path, Path(CCD_PATH)):
+                    if trial.exists():
+                        with open(trial, "rb") as f:
+                            ccd = pickle.load(f)
+                        break
+                if ccd is None:
+                    print("[dryrun] could not locate ccd.pkl; skipping dryrun", flush=True)
+                else:
+                    print(f"[dryrun] running parse_boltz_schema(boltz_2=True)...", flush=True)
+                    parse_boltz_schema("input", schema_dict, ccd, mol_dir=None, boltz_2=True)
+                    print("[dryrun] parse OK", flush=True)
+            except Exception as e:
+                import traceback as _tb
+                print(f"[dryrun] PARSE ERROR: {type(e).__name__}: {e}", flush=True)
+                _tb.print_exc()
 
         cmd = [
             "boltz", "predict", str(input_path),
@@ -187,6 +253,8 @@ def run_structure_prediction(
             print("STDERR:", result.stderr[-2000:])
             raise RuntimeError(f"boltz predict failed (rc={result.returncode}): {result.stderr[-500:]}")
 
+        if result.stderr:
+            print("STDERR (rc=0):", result.stderr[-3000:], flush=True)
         print(result.stdout[-1000:] if result.stdout else "")
 
         buf = io.BytesIO()

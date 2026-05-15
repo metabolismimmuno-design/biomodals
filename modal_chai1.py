@@ -80,6 +80,8 @@ def chai1(
     num_diffn_timesteps: int = 200,
     seed: int = 42,
     use_esm_embeddings: bool = True,
+    use_msa_server: bool = False,
+    msa_a3m_by_seq: dict | None = None,
     chai1_kwargs: dict = {},
 ) -> list:
     """Runs Chai-1 on a FASTA file string and returns the output files.
@@ -92,8 +94,22 @@ def chai1(
         num_diffn_timesteps (int): Number of diffusion timesteps. Defaults to 200.
         seed (int): Random seed for reproducibility. Defaults to 42.
         use_esm_embeddings (bool): Whether to use ESM embeddings. Defaults to True.
+        use_msa_server (bool): Whether to fetch MSA from ColabFold server. Defaults to False
+                               (ESM-only). Set True to enable MSA-conditioned prediction —
+                               critical for accurate antigen folding (raises antigen pTM
+                               typically from ~0.4 ESM-only to ~0.7+ with MSA).
+        msa_a3m_by_seq (dict | None): Per-chain pre-computed MSA. Keys are chain
+                              protein sequences (case-insensitive, uppercased internally);
+                              values are a3m file content as string. For each entry,
+                              chai_lab's `merge_a3m_in_directory` converts a3m → aligned.pqt
+                              keyed by sha256(seq.upper()), which `run_inference` picks up
+                              via msa_directory. **Chains absent from the dict fall back to
+                              ESM** — this is the natural mechanism for "antigen with MSA,
+                              VHH single-sequence". Mutually exclusive with `use_msa_server=True`.
+                              Defaults to None.
         chai1_kwargs (dict): Additional keyword arguments to pass to `run_inference`.
-                             Defaults to an empty dict.
+                             Defaults to an empty dict. Note: do not duplicate
+                             `use_msa_server` here if passed explicitly above.
 
     Returns:
         list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative
@@ -103,11 +119,41 @@ def chai1(
     from tempfile import TemporaryDirectory
     from chai_lab.chai1 import run_inference
 
-    with TemporaryDirectory() as td_in, TemporaryDirectory() as td_out:
+    # 防止 escape hatch 与一等参数重复：若 chai1_kwargs 显式带 use_msa_server，则覆盖外层
+    kw = dict(chai1_kwargs) if chai1_kwargs else {}
+    if "use_msa_server" in kw:
+        use_msa_server = kw.pop("use_msa_server")
+
+    if msa_a3m_by_seq and use_msa_server:
+        raise ValueError(
+            "msa_a3m_by_seq and use_msa_server=True are mutually exclusive — "
+            "Chai-1 accepts either pre-computed msa_directory OR live ColabFold."
+        )
+
+    with TemporaryDirectory() as td_in, TemporaryDirectory() as td_out, TemporaryDirectory() as td_msa:
         fasta_path = Path(td_in) / input_faa_name
         fasta_path.write_text(input_faa_str)
 
-        _ = run_inference(
+        msa_directory = None
+        if msa_a3m_by_seq:
+            from chai_lab.data.parsing.msas.aligned_pqt import merge_a3m_in_directory
+            msa_dir = Path(td_msa)
+            for i, (seq, a3m_str) in enumerate(msa_a3m_by_seq.items()):
+                if not a3m_str or not a3m_str.strip():
+                    print(f"[MSA] seq#{i} ({seq[:20]}...): empty a3m, skipping", flush=True)
+                    continue
+                # Per-seq staging subdir; merge_a3m_in_directory will produce
+                # <sha256(seq.upper())>.aligned.pqt into msa_dir.
+                stage = Path(td_msa) / f"_stage_{i}"
+                stage.mkdir()
+                (stage / "hits_uniref90.a3m").write_text(a3m_str)
+                merge_a3m_in_directory(str(stage), output_directory=str(msa_dir))
+                print(f"[MSA] seq#{i} ({seq[:20]}...): wrote pqt for {len(a3m_str)} chars a3m", flush=True)
+            pqt_files = list(msa_dir.glob("*.aligned.pqt"))
+            print(f"[MSA] msa_directory={msa_dir} contains {len(pqt_files)} pqt file(s)", flush=True)
+            msa_directory = msa_dir
+
+        run_kwargs = dict(
             fasta_file=Path(fasta_path),
             output_dir=Path(td_out),
             num_trunk_recycles=num_trunk_recycles,
@@ -115,8 +161,13 @@ def chai1(
             seed=seed,
             device=torch.device("cuda:0"),
             use_esm_embeddings=use_esm_embeddings,
-            **chai1_kwargs,
+            use_msa_server=use_msa_server,
         )
+        if msa_directory is not None:
+            run_kwargs["msa_directory"] = msa_directory
+        run_kwargs.update(kw)
+
+        _ = run_inference(**run_kwargs)
 
         return [
             (out_file.relative_to(td_out), open(out_file, "rb").read())
@@ -131,6 +182,7 @@ def main(
     out_dir: str = "./out/chai1",
     run_name=None,
     chai1_kwargs=None,
+    msa_a3m_dir: str = "",
 ):
     """Local entrypoint for running Chai-1 predictions using Modal.
 
@@ -148,9 +200,18 @@ def main(
 
     input_faa_str = open(input_faa).read()
 
+    # Optional CLI mode: --msa-a3m-dir <dir> where filenames are <SEQ>.a3m
+    # (SEQ uppercase). Keys in msa_a3m_by_seq dict = uppercased chain sequence.
+    msa_a3m_by_seq = None
+    if msa_a3m_dir:
+        msa_a3m_by_seq = {}
+        for p in Path(msa_a3m_dir).glob("*.a3m"):
+            msa_a3m_by_seq[p.stem.upper()] = p.read_text()
+
     outputs = chai1.remote(
         input_faa_str,
         input_faa_name=Path(input_faa).name,
+        msa_a3m_by_seq=msa_a3m_by_seq,
         chai1_kwargs=dict(eval(chai1_kwargs)) if chai1_kwargs else {},
     )
 

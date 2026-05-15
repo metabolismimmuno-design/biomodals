@@ -19,23 +19,23 @@ VQLVESGGGLVQPGGSLRLSCAASXXXXXXYMNWVRQAPGKGLEWVSAIG...
 >L
 DIQMTQSPSSLSASVGDRVTITCXXXXXXWYQQKPGKAPKLLIYKASSLES...
 >A
-(This tells IgGM to use chain A from the antigen PDB file)
+ANTIGENSEQUENCEHERE...  (MUST include full antigen sequence — empty body causes aa_seq=None crash)
 
 # Single chain with antigen (antigen chain B in PDB)
 >H
 QVQLVESGGGLVQPGGSLRLSCAASGFTFSXXXXXXXXXXXXXXXXXXXTRV...
 >B
-(This tells IgGM to use chain B from the antigen PDB file)
+ANTIGENSEQUENCEHERE...  (MUST include full antigen sequence)
 ```
 
 Example usage:
 ```
 # Nanobody design with antigen
-# FASTA: >H\nsequence...\n>A\n(empty, just specifies chain A)
+# FASTA: >H\nsequence...\n>A\nFULL_ANTIGEN_SEQUENCE  (>A body MUST NOT be empty)
 uv run modal run modal_iggm.py --input-fasta nanobody.fasta --antigen antigen.pdb --epitope "41,42,43" --task design
 
 # Antibody design with antigen
-# FASTA: >H\nsequence...\n>L\nsequence...\n>A\n(empty, just specifies chain A)
+# FASTA: >H\nsequence...\n>L\nsequence...\n>A\nFULL_ANTIGEN_SEQUENCE
 uv run modal run modal_iggm.py --input-fasta antibody.fasta --antigen antigen.pdb --epitope "126,127,129" --task design
 
 # Structure prediction only (no antigen)

@@ -315,6 +315,7 @@ def run_germinal_design(
     max_passing_designs: int = 10,
     experiment_name: str = "germinal_design",
     original_pdb_path: str = "pdbs/target.pdb",
+    starting_binder_seq: str = "",
 ) -> dict:
     """
     Run Germinal antibody design pipeline
@@ -411,10 +412,23 @@ def run_germinal_design(
         # Copy actual Germinal config files instead of creating our own
 
         # Copy run config from Germinal
+        run_config_dst = temp_path / "configs" / "run" / f"{run_type.lower()}.yaml"
         shutil.copy2(
             germinal_configs_path / "run" / f"{run_type.lower()}.yaml",
-            temp_path / "configs" / "run" / f"{run_type.lower()}.yaml",
+            run_config_dst,
         )
+        if starting_binder_seq:
+            import re
+            with open(run_config_dst) as f:
+                run_content = f.read()
+            run_content = re.sub(
+                r'starting_binder_seq:.*',
+                f'starting_binder_seq: {starting_binder_seq}',
+                run_content
+            )
+            with open(run_config_dst, "w") as f:
+                f.write(run_content)
+            print(f"Using custom starting scaffold ({len(starting_binder_seq)} aa): {starting_binder_seq[:30]}...")
 
         # Use "pdl1" as target name to avoid Hydra config issues
         target_config_final_path = temp_path / "configs" / "target" / "pdl1.yaml"
@@ -665,6 +679,11 @@ def main(
     print(f"Max trajectories: {max_trajectories}")
     print(f"Max passing designs: {max_passing_designs}")
 
+    # Read optional starting scaffold from target yaml
+    starting_binder_seq = target_data.get("starting_binder_seq", "")
+    if starting_binder_seq:
+        print(f"Custom starting scaffold: {len(starting_binder_seq)} aa")
+
     # Run design
     results = run_germinal_design.remote(
         target_yaml_content=target_yaml_content,
@@ -674,6 +693,7 @@ def main(
         max_passing_designs=max_passing_designs,
         experiment_name=experiment_name,
         original_pdb_path=original_pdb_path,
+        starting_binder_seq=starting_binder_seq,
     )
 
     # Set up output directory
