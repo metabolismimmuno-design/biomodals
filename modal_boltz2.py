@@ -199,6 +199,27 @@ def run_structure_prediction(
                 msa_path.write_text(clean)
                 yaml_str = yaml_str.replace(placeholder, str(msa_path))
                 print(f"[MSA] {placeholder} → {msa_path} ({len(clean)} chars, stripped {len(a3m_str)-len(clean)} NULL bytes)", flush=True)
+            # Boltz #627: cached a3m + multi-protein-chain → silent cross-chain
+            # paired-MSA failure. parse_a3m() lacks a taxonomy DB at inference, so
+            # every cached sequence gets taxonomy_id=-1; construct_paired_msa()
+            # then treats the chains as evolutionarily unrelated. MSA depth and
+            # monomer pTM look normal — only a pos/neg iPTM Δ exposes the loss of
+            # discrimination. Fix: key=0 forced-pairing CSV MSA, or the
+            # Novel-Therapeutics/boltz-community fork (commit 51d54c4).
+            # https://github.com/jwohlwend/boltz/issues/627
+            try:
+                import yaml as _msa_yaml
+                _seqs = (_msa_yaml.safe_load(yaml_str) or {}).get("sequences", [])
+                _n_prot = sum(1 for s in _seqs if isinstance(s, dict) and "protein" in s)
+            except Exception:
+                _n_prot = 0
+            if _n_prot >= 2:
+                print(f"[MSA] WARNING (Boltz #627): cached a3m supplied for a "
+                      f"{_n_prot}-protein-chain complex — cross-chain paired-MSA may "
+                      f"silently collapse (taxonomy_id=-1), making iPTM lose pos/neg "
+                      f"discrimination. Verify with a pos/neg control, or switch to "
+                      f"key=0 CSV MSA / the boltz-community fork. "
+                      f"https://github.com/jwohlwend/boltz/issues/627", flush=True)
         input_path = Path(in_dir) / "input.yaml"
         input_path.write_text(yaml_str)
 
